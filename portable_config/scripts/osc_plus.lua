@@ -1,35 +1,48 @@
 --[[
 SOURCE_ https://github.com/mpv-player/mpv/blob/master/player/lua/osc.lua
-COMMIT_ bca516bd2c282670aa2c92663329e7d5ddf978e0
+COMMIT_ b7ffe0d16eec8153d9609382997baaf6a29e5e4f
+文档_ https://github.com/hooke007/MPV_lazy/discussions/18
 
-改进版本的OSC，须禁用原始mpv的内置OSC，且不兼容其它OSC类脚本（实现全部功能需搭配 新缩略图引擎 thumbfast ）
+改进版本的OSC，不兼容其它OSC类脚本（实现全部功能需搭配 新缩略图引擎 thumbfast ）
+（可选）mpv.conf的前置条件 --osc=no （否则个别功能可能不可用）
 
 示例在 input.conf 中写入：
 SHIFT+DEL   script-binding osc_plus/visibility   # 切换 osc_plus 的可见性
-]]--
 
-local assdraw = require 'mp.assdraw'
-local msg = require 'mp.msg'
-local opt = require 'mp.options'
-local utils = require 'mp.utils'
+<KEY>   script-message-to osc_plus osc-visibility <值>   # <auto|always|never|cycle> 指定 osc_plus 的可见性
+<KEY>   script-message-to osc_plus osc-idlescreen <值>   # <yes|no|cycle> 指定空闲状态Logo的可见性
+<KEY>   script-message-to osc_plus osc_layout <值>       # <bottombar|topbar|bottombox|box|slimbox> 指定 osc_plus 的布局
+]]
 
+-- 保持禁用原始OSC
+if mp.get_property_native("osc") then
+    local mouse_stat = mp.get_property_native("input-cursor")
+    if mouse_stat then
+        mp.set_property("input-cursor", "no")
+        mp.set_property("osc", "no")
+        mp.add_timeout(0.5, function() mp.set_property("input-cursor", "yes") end)
+    else
+        mp.set_property("osc", "no")
+    end
+    mp.msg.warn("建议启动前应用 --osc=no 以确保全部功能可用")
+end
 mp.observe_property("osc", "bool", function(_, value)
-    local info = "检测到原OSC的启用！"
     if value == true then
         mp.set_property("osc", "no")
-        mp.msg.warn(info)
-        local osm = mp.create_osd_overlay("ass-events")
-        osm.data = "{\\1c&H0099FF&\\an9}" .. info
-        osm:update()
-        mp.add_timeout(3, function() osm:remove() end)
+        mp.msg.error("请勿在运行时修改 osc 属性！")
     end
 end)
+
+local assdraw = require "mp.assdraw"
+local msg = require "mp.msg"
+local opt = require "mp.options"
+local utils = require "mp.utils"
 
 --
 -- Parameters
 --
--- default user option values
--- do not touch, change them in osc.conf
+-- 用户选项的默认值
+-- 应在 osc_plus.conf 中修改
 local user_opts = {
     showwindowed = true,                 -- show OSC when windowed?
     showfullscreen = true,               -- show OSC when fullscreen?
@@ -38,29 +51,29 @@ local user_opts = {
     scalefullscreen = 1,                 -- scaling of the controller when fullscreen
     scaleforcedwindow = 2,               -- scaling when rendered on a forced window
     vidscale = true,                     -- scale the controller with the video?
-    valign = 0.8,                        -- vertical alignment, -1 (top) to 1 (bottom)
-    halign = 0,                          -- horizontal alignment, -1 (left) to 1 (right)
+    valign = 0.8,                        -- <-1...1> 垂直对齐，1 为底部（不影响 bottombox 布局）
+    halign = 0,                          -- <-1...1> 水平对齐，1 为右侧（不影响 bottombox 布局）
     barmargin = 0,                       -- vertical margin of top/bottombar
-    boxalpha = 80,                       -- alpha of the background box, 0 (opaque) to 255 (fully transparent)
+    boxalpha = 80,                       -- <0...255> 背景透明度，255 为完全透明（不影响 bottombox 布局）
     hidetimeout = 500,                   -- duration in ms until the OSC hides if no mouse movement. enforced non-negative for the user, but internally negative is "always-on".
     fadeduration = 200,                  -- duration of fade out in ms, 0 = no fade
     deadzonesize = 0.5,                  -- size of deadzone
     minmousemove = 0,                    -- minimum amount of pixels the mouse has to move between ticks to make the OSC show up
     iamaprogrammer = false,              -- use native mpv values and disable OSC internal track list management (and some functions that depend on it)
-    layout = "bottombar",                -- 原版可选为 "bottombar" "topbar" "box" "slimbox" ；在此版本中新增 "bottombox"
+    layout = "bottombar",                -- <bottombar|topbar|bottombox|box|slimbox> 布局类型。此版新增 bottombox
     seekbarstyle = "bar",                -- bar, diamond or knob
     seekbarhandlesize = 0.6,             -- size ratio of the diamond and knob handle
     seekrangestyle = "inverted",         -- bar, line, slider, inverted or none
     seekrangeseparate = true,            -- whether the seekranges overlay on the bar-style seekbar
     seekrangealpha = 200,                -- transparency of seekranges
-    seekbarkeyframes = true,             -- use keyframes when dragging the seekbar       -- 现不受全局hr-seek的控制 
+    seekbarkeyframes = true,             -- 是否在拖动时间轴时使用关键帧（现不受全局 --hr-seek 的控制）
     title = "${media-title}",            -- string compatible with property-expansion to be shown as OSC title
     tooltipborder = 1,                   -- border of tooltip in bottom/topbar
-    timetotal = true,                    -- display total time instead of remaining time? -- 原版为false
+    timetotal = true,                    -- 是否显示总时间（否为剩余时间） 原版为 false
     timems = false,                      -- display timecodes with milliseconds?
     tcspace = 100,                       -- timecode spacing (compensate font size estimation)
     visibility = "auto",                 -- only used at init to set visibility_mode(...)
-    boxmaxchars = 150,                   -- title crop threshold for box layout           -- 原版为80
+    boxmaxchars = 150,                   -- box 类布局下的标题字符数限制（原版为 80 ）
     boxvideo = false,                    -- apply osc_param.video_margins to video
     windowcontrols = "auto",             -- whether to show window controls
     windowcontrols_alignment = "right",  -- which side to show window controls on
@@ -73,11 +86,13 @@ local user_opts = {
 
     -- 以下为此版本的独占选项
 
+    scale_shift = 1,                     -- 全局界面的缩放补偿系数
+    playing_msg = "",                    -- 类似 https://mpv.io/manual/master/#options-osd-playing-msg
     wctitle = "${media-title}",          -- 无边框的上方标题
-    sub_title = " ",                     -- bottombox布局的右侧子标题
+    sub_title = "",                      -- bottombox布局的右侧子标题
     sub_title2 = "对比[${contrast}]  明度[${brightness}]  伽马[${gamma}]  饱和[${saturation}]  色相[${hue}]",
                                          -- bottombox布局的临时右侧子标题
-    seekbar_scrollseek = "fast",         -- 进度条的滚轮跳转模式 "fast" "second" "frame" 。不受全局hr-seek的控制
+    seekbar_scrollseek = "fast",         -- <fast|second|frame> 进度条的滚轮跳转模式。不受全局hr-seek的控制
     showonpause = false,                 -- 在暂停时常驻 OSC
     showonstart = false,                 -- 在播放开始或当播放下一个文件时显示 OSC
     showonseek = false,                  -- 在跳转时显示 OSC
@@ -490,7 +505,7 @@ end
 function window_controls_enabled()
     val = user_opts.windowcontrols
     if val == "auto" then
-        return not state.border
+        return not state.border or state.fullscreen  -- 全屏时启用osc顶部控件
     else
         return val ~= "no"
     end
@@ -508,7 +523,7 @@ local elements = {}
 
 function prepare_elements()
 
-    -- remove elements without layout or invisble
+    -- remove elements without layout or invisible
     local elements2 = {}
     for n, element in pairs(elements) do
         if not (element.layout == nil) and (element.visible) then
@@ -980,7 +995,7 @@ function limited_list(prop, pos)
         return count, proplist
     end
 
-    local fs = tonumber(mp.get_property('options/osd-font-size'))
+    local fs = tonumber(mp.get_property("options/osd-font-size"))
     local max = math.ceil(osc_param.unscaled_y*0.75 / fs)
     if max % 2 == 0 then
         max = max - 1
@@ -999,41 +1014,41 @@ function limited_list(prop, pos)
 end
 
 function get_playlist()
-    local pos = mp.get_property_number('playlist-pos', 0) + 1
-    local count, limlist = limited_list('playlist', pos)
+    local pos = mp.get_property_number("playlist-pos", 0) + 1
+    local count, limlist = limited_list("playlist", pos)
     if count == 0 then
-        return 'Empty playlist.'
+        return "播放列表为空"
     end
 
-    local message = string.format('播放列表 [%d/%d]\n', pos, count)
+    local message = string.format("播放列表 [%d/%d]\n", pos, count)
     for i, v in ipairs(limlist) do
         local title = v.title
         local _, filename = utils.split_path(v.filename)
         if title == nil then
             title = filename
         end
-        message = string.format('%s %s %s\n', message,
-            (v.current and '●' or '○'), title)
+        message = string.format("%s %s %s\n", message,
+            (v.current and "●" or "○"), title)
     end
     return message
 end
 
 function get_chapterlist()
-    local pos = mp.get_property_number('chapter', 0) + 1
-    local count, limlist = limited_list('chapter-list', pos)
+    local pos = mp.get_property_number("chapter", 0) + 1
+    local count, limlist = limited_list("chapter-list", pos)
     if count == 0 then
-        return 'No chapters.'
+        return "无章节"
     end
 
-    local message = string.format('章节列表 [%d/%d]\n', pos, count)
+    local message = string.format("章节列表 [%d/%d]\n", pos, count)
     for i, v in ipairs(limlist) do
         local time = mp.format_time(v.time)
         local title = v.title
         if title == nil then
-            title = string.format('Chapter %02d', i)
+            title = string.format("Chapter %02d", i)
         end
-        message = string.format('%s[%s] %s %s\n', message, time,
-            (v.current and '●' or '○'), title)
+        message = string.format("%s[%s] %s %s\n", message, time,
+            (v.current and "●" or "○"), title)
     end
     return message
 end
@@ -1151,14 +1166,14 @@ function add_layout(name)
     end
 end
 
--- Window Controls
+-- Window Controls -- 窗口控制按钮
 function window_controls(topbar)
     local wc_geo = {
         x = 0,
-        y = 30 + user_opts.barmargin,
+        y = 40 + user_opts.barmargin,
         an = 1,
         w = osc_param.playresx,
-        h = 30,
+        h = 40,
     }
 
     local alignment = window_controls_alignment()
@@ -1258,7 +1273,7 @@ function window_controls(topbar)
         osc_param.video_margins.t = wc_geo.h / osc_param.playresy
     end
 
-    -- Window Title
+    -- Window Title -- 无边框的窗口标题
     ne = new_element("wctitle", "button")
     ne.content = function ()
         local title = mp.command_native({"expand-text", user_opts.wctitle}) -- 独立于无边框的标题
@@ -1270,7 +1285,7 @@ function window_controls(topbar)
     local right_pad = 10
     lo = add_layout("wctitle")
     lo.geometry =
-        { x = titlebox_left + left_pad, y = wc_geo.y - 3, an = 1,
+        { x = titlebox_left + left_pad, y = wc_geo.y - 8, an = 1,
           w = titlebox_w, h = wc_geo.h }
     lo.style = string.format("%s{\\clip(%f,%f,%f,%f)}",
         osc_styles.wcTitle,
@@ -1512,8 +1527,8 @@ layouts["bottombox"] = function ()
     -- 背景板
     --
 
-    new_element('bb_backgroud', 'box')
-	lo = add_layout('bb_backgroud')
+    new_element("bb_backgroud", "box")
+	lo = add_layout("bb_backgroud")
 	lo.geometry = {x = posX, y = osc_param.playresy, an = 5, w = osc_w, h = 0}
 	lo.layer = 10
 	lo.style = osc_styles.bb_backgroud
@@ -2062,7 +2077,7 @@ function osc_init()
         scale = user_opts.scalewindowed
     end
     
-    scale = scale * mp.get_property_native("display-hidpi-scale", 1.0) -- 纳入dpi系数计算缩放
+    scale = scale * mp.get_property_native("display-hidpi-scale", 1.0) * user_opts.scale_shift -- 纳入dpi系数计算缩放
 
     if user_opts.vidscale then
         osc_param.unscaled_y = baseResY
@@ -2123,7 +2138,7 @@ function osc_init()
                       mp.command_native({"expand-text", user_opts.sub_title})
         -- escape ASS, and strip newlines and trailing slashes
         title = title:gsub("\\n", " "):gsub("\\$", ""):gsub("{","\\{")
-        return not (title == "") and title or "mpv"
+        return title
     end
 
     -- playlist buttons
@@ -2267,7 +2282,7 @@ function osc_init()
     ne = new_element("cy_audio", "button")
 
     ne.enabled = (#tracks_osc.audio > 0)
-    ne.off = (get_track('audio') == 0)
+    ne.off = (get_track("audio") == 0)
     ne.content = function ()
         local aid = "–"
         if not (get_track("audio") == 0) then
@@ -2296,7 +2311,7 @@ function osc_init()
     end
 
     ne.enabled = (#tracks_osc.sub > 0)
-    ne.off = (get_track('sub') == 0)
+    ne.off = (get_track("sub") == 0)
     ne.content = function ()
         local sid = "–"
         if not (get_track("sub") == 0) then
@@ -2393,8 +2408,8 @@ function osc_init()
             -- mouse move events may pile up during seeking and may still get
             -- sent when the user is done seeking, so we need to throw away
             -- identical seeks
-            thumbfast.pause = false --暂停渲染缩略图
-            mp.commandv("script-message-to", "thumbfast", "clear")
+            thumbfast.pause = false -- 暂停渲染缩略图
+            -- mp.commandv("script-message-to", "thumbfast", "clear") -- 会有高几率冻结
             local seekto = get_slider_value(element)
             if (element.state.lastseek == nil) or
                 (not (element.state.lastseek == seekto)) then
@@ -2415,16 +2430,16 @@ function osc_init()
         function (element) element.state.lastseek = nil end
 
     ne.eventresponder["wheel_up_press"] = function ()
-        if user_opts.seekbar_scrollseek == "fast" then mp.commandv('seek', -0.1, 'keyframes')
-        elseif user_opts.seekbar_scrollseek == "second" then mp.commandv('seek', -1, 'exact')
-        elseif user_opts.seekbar_scrollseek == "frame" then mp.commandv('frame-back-step')
+        if user_opts.seekbar_scrollseek == "fast" then mp.commandv("seek", -0.1, "keyframes")
+        elseif user_opts.seekbar_scrollseek == "second" then mp.commandv("seek", -1, "exact")
+        elseif user_opts.seekbar_scrollseek == "frame" then mp.commandv("frame-back-step")
         end
     end
 
     ne.eventresponder["wheel_down_press"] = function ()
-        if user_opts.seekbar_scrollseek == "fast" then mp.commandv('seek', 0.1, 'keyframes')
-        elseif user_opts.seekbar_scrollseek == "second" then mp.commandv('seek', 1, 'exact')
-        elseif user_opts.seekbar_scrollseek == "frame" then mp.commandv('frame-step')
+        if user_opts.seekbar_scrollseek == "fast" then mp.commandv("seek", 0.1, "keyframes")
+        elseif user_opts.seekbar_scrollseek == "second" then mp.commandv("seek", 1, "exact")
+        elseif user_opts.seekbar_scrollseek == "frame" then mp.commandv("frame-step")
         end
     end
 
@@ -2523,14 +2538,14 @@ function osc_init()
 
     ne.content = "\238\132\135"
     ne.eventresponder["mbtn_left_up"] =
-        function () mp.commandv("script-binding", "stats/display-stats-toggle") end
+        function () mp.commandv("script-binding", "display-stats-toggle") end
     ne.eventresponder["mbtn_right_up"] =
-        function () mp.commandv("script-binding", "stats/display-page-4") end
+        function () mp.commandv("script-binding", "display-page-4") end
 
     ne.eventresponder["wheel_up_press"] =
-        function () mp.commandv("script-binding", "stats/display-page-1") end
+        function () mp.commandv("script-binding", "display-page-1") end
     ne.eventresponder["wheel_down_press"] =
-        function () mp.commandv("script-binding", "stats/display-page-2") end
+        function () mp.commandv("script-binding", "display-page-2") end
 
     -- load layout
     layouts[user_opts.layout]()
@@ -2593,11 +2608,13 @@ function update_margins()
 
     utils.shared_script_property_set("osc-margins",
         string.format("%f,%f,%f,%f", margins.l, margins.r, margins.t, margins.b))
+    mp.set_property_native("user-data/osc/margins", margins)
 end
 
 function shutdown()
     reset_margins()
     utils.shared_script_property_set("osc-margins", nil)
+    mp.del_property("user-data/osc")
 end
 
 --
@@ -2622,6 +2639,12 @@ end
 
 function hide_osc()
     msg.trace("hide_osc")
+
+    -- 关联 thumbfast.lua
+    if thumbfast.width ~= 0 or thumbfast.height ~= 0 then
+        mp.commandv("script-message-to", "thumbfast", "clear")
+    end
+
     if not state.enabled then
         -- typically hide happens at render() from tick(), but now tick() is
         -- no-op and won't render again to remove the osc, so do that manually.
@@ -2732,7 +2755,7 @@ function render()
 
     -- init management
     if state.active_element then
-        -- mouse is held down on some element - keep ticking and igore initReq
+        -- mouse is held down on some element - keep ticking and ignore initReq
         -- till it's released, or else the mouse-up (click) will misbehave or
         -- get ignored. that's because osc_init() recreates the osc elements,
         -- but mouse handling depends on the elements staying unmodified
@@ -2783,14 +2806,14 @@ function render()
 
     --mouse show/hide area
     for k,cords in pairs(osc_param.areas["showhide"]) do
-        set_virt_mouse_area(cords.x1, cords.y1, cords.x2, cords.y2, "showhide")
+        set_virt_mouse_area(cords.x1, cords.y1, cords.x2, cords.y2, "showhide_osc_plus")
     end
     if osc_param.areas["showhide_wc"] then
         for k,cords in pairs(osc_param.areas["showhide_wc"]) do
-            set_virt_mouse_area(cords.x1, cords.y1, cords.x2, cords.y2, "showhide_wc")
+            set_virt_mouse_area(cords.x1, cords.y1, cords.x2, cords.y2, "showhide_wc_osc_plus")
         end
     else
-        set_virt_mouse_area(0, 0, 0, 0, "showhide_wc")
+        set_virt_mouse_area(0, 0, 0, 0, "showhide_wc_osc_plus")
     end
     do_enable_keybindings()
 
@@ -2799,13 +2822,13 @@ function render()
 
     for _,cords in ipairs(osc_param.areas["input"]) do
         if state.osc_visible then -- activate only when OSC is actually visible
-            set_virt_mouse_area(cords.x1, cords.y1, cords.x2, cords.y2, "input")
+            set_virt_mouse_area(cords.x1, cords.y1, cords.x2, cords.y2, "input_osc_plus")
         end
         if state.osc_visible ~= state.input_enabled then
             if state.osc_visible then
-                mp.enable_key_bindings("input")
+                mp.enable_key_bindings("input_osc_plus")
             else
-                mp.disable_key_bindings("input")
+                mp.disable_key_bindings("input_osc_plus")
             end
             state.input_enabled = state.osc_visible
         end
@@ -2818,13 +2841,13 @@ function render()
     if osc_param.areas["window-controls"] then
         for _,cords in ipairs(osc_param.areas["window-controls"]) do
             if state.osc_visible then -- activate only when OSC is actually visible
-                set_virt_mouse_area(cords.x1, cords.y1, cords.x2, cords.y2, "window-controls")
+                set_virt_mouse_area(cords.x1, cords.y1, cords.x2, cords.y2, "window-controls_osc_plus")
             end
             if state.osc_visible ~= state.windowcontrols_buttons then
                 if state.osc_visible then
-                    mp.enable_key_bindings("window-controls")
+                    mp.enable_key_bindings("window-controls_osc_plus")
                 else
-                    mp.disable_key_bindings("window-controls")
+                    mp.disable_key_bindings("window-controls_osc_plus")
                 end
                 state.windowcontrols_buttons = state.osc_visible
             end
@@ -3001,6 +3024,9 @@ function tick()
         -- render idle message
         msg.trace("idle message")
         local _, _, display_aspect = mp.get_osd_size()
+        if display_aspect == 0 then
+            return
+        end
         local display_h = 360
         local display_w = display_h * display_aspect
         -- logo is rendered at 2^(6-1) = 32 times resolution with size 1800x1800
@@ -3033,8 +3059,8 @@ function tick()
         set_osd(display_w, display_h, ass.text)
 
         if state.showhide_enabled then
-            mp.disable_key_bindings("showhide")
-            mp.disable_key_bindings("showhide_wc")
+            mp.disable_key_bindings("showhide_osc_plus")
+            mp.disable_key_bindings("showhide_wc_osc_plus")
             state.showhide_enabled = false
         end
 
@@ -3069,8 +3095,8 @@ end
 function do_enable_keybindings()
     if state.enabled then
         if not state.showhide_enabled then
-            mp.enable_key_bindings("showhide", "allow-vo-dragging+allow-hide-cursor")
-            mp.enable_key_bindings("showhide_wc", "allow-vo-dragging+allow-hide-cursor")
+            mp.enable_key_bindings("showhide_osc_plus", "allow-vo-dragging+allow-hide-cursor")
+            mp.enable_key_bindings("showhide_wc_osc_plus", "allow-vo-dragging+allow-hide-cursor")
         end
         state.showhide_enabled = true
     end
@@ -3083,8 +3109,8 @@ function enable_osc(enable)
     else
         hide_osc() -- acts immediately when state.enabled == false
         if state.showhide_enabled then
-            mp.disable_key_bindings("showhide")
-            mp.disable_key_bindings("showhide_wc")
+            mp.disable_key_bindings("showhide_osc_plus")
+            mp.disable_key_bindings("showhide_wc_osc_plus")
         end
         state.showhide_enabled = false
     end
@@ -3141,7 +3167,7 @@ mp.register_script_message("osc-tracklist", function(dur)
     for k,v in pairs(nicetypes) do
         table.insert(msg, get_tracklist(k))
     end
-    show_message(table.concat(msg, '\n\n'), dur)
+    show_message(table.concat(msg, "\n\n"), dur)
 end)
 
 mp.observe_property("fullscreen", "bool",
@@ -3187,11 +3213,11 @@ end)
 mp.set_key_bindings({
     {"mouse_move",              function(e) process_event("mouse_move", nil) end},
     {"mouse_leave",             mouse_leave},
-}, "showhide", "force")
+}, "showhide_osc_plus", "force")
 mp.set_key_bindings({
     {"mouse_move",              function(e) process_event("mouse_move", nil) end},
     {"mouse_leave",             mouse_leave},
-}, "showhide_wc", "force")
+}, "showhide_wc_osc_plus", "force")
 do_enable_keybindings()
 
 --mouse input bindings
@@ -3210,14 +3236,14 @@ mp.set_key_bindings({
     {"mbtn_left_dbl",       "ignore"},
     {"shift+mbtn_left_dbl", "ignore"},
     {"mbtn_right_dbl",      function(e) process_event("mbtn_right_dbl", "press") end}, -- 右键双击检查
-}, "input", "force")
-mp.enable_key_bindings("input")
+}, "input_osc_plus", "force")
+mp.enable_key_bindings("input_osc_plus")
 
 mp.set_key_bindings({
     {"mbtn_left",           function(e) process_event("mbtn_left", "up") end,
                             function(e) process_event("mbtn_left", "down")  end},
-}, "window-controls", "force")
-mp.enable_key_bindings("window-controls")
+}, "window-controls_osc_plus", "force")
+mp.enable_key_bindings("window-controls_osc_plus")
 
 function get_hidetimeout()
     if user_opts.visibility == "always" then
@@ -3264,6 +3290,7 @@ function visibility_mode(mode, no_osd)
 
     user_opts.visibility = mode
     utils.shared_script_property_set("osc-visibility", mode)
+    mp.set_property_native("user-data/osc/visibility", mode)
 
     if not no_osd and tonumber(mp.get_property("osd-level")) >= 1 then
         mp.osd_message("OSC的可见性：" .. mode)
@@ -3272,8 +3299,8 @@ function visibility_mode(mode, no_osd)
     -- Reset the input state on a mode change. The input state will be
     -- recalculated on the next render cycle, except in 'never' mode where it
     -- will just stay disabled.
-    mp.disable_key_bindings("input")
-    mp.disable_key_bindings("window-controls")
+    mp.disable_key_bindings("input_osc_plus")
+    mp.disable_key_bindings("window-controls_osc_plus")
     state.input_enabled = false
 
     update_margins()
@@ -3296,6 +3323,7 @@ function idlescreen_visibility(mode, no_osd)
     end
 
     utils.shared_script_property_set("osc-idlescreen", mode)
+    mp.set_property_native("user-data/osc/idlescreen", user_opts.idlescreen)
 
     if not no_osd and tonumber(mp.get_property("osd-level")) >= 1 then
         mp.osd_message("OSC logo的可见性：" .. tostring(mode))
@@ -3310,6 +3338,53 @@ mp.add_key_binding(nil, "visibility", function() visibility_mode("cycle") end)
 
 mp.register_script_message("osc-idlescreen", idlescreen_visibility)
 
+-- 运行时变更布局
+function osc_layout(layout, no_osd)
+    if layout == "bottombar" then
+        user_opts.layout = "bottombar"
+    elseif layout == "topbar" then
+        user_opts.layout = "topbar"
+    elseif layout == "bottombox" then
+        user_opts.layout = "bottombox"
+    elseif layout == "box" then
+        user_opts.layout = "box"
+    elseif layout == "slimbox" then
+        user_opts.layout = "slimbox"
+    else
+        return
+    end
+    if not no_osd and tonumber(mp.get_property("osd-level")) >= 1 then
+        mp.osd_message("OSC 的布局：" .. tostring(layout))
+    end
+    update_options(list)
+end
+mp.register_script_message("osc_layout", osc_layout)
+
+-- 实验性的 "osc-playing-msg"
+if user_opts.playing_msg ~= nil then
+    local osc_playing_msg = mp.create_osd_overlay("ass-events")
+    local opm_id = nil
+    mp.register_event("file-loaded", function()
+        path_updated = true
+        local info = mp.command_native({"expand-text", user_opts.playing_msg})
+        osc_playing_msg.data = info
+        osc_playing_msg:update()
+        if opm_id ~= nil then
+            mp.cancel_timer(opm_id)
+        end
+        opm_id = mp.add_timeout(3, function()
+            osc_playing_msg:remove()
+            opm_id = nil
+        end)
+    end)
+    mp.register_event("end-file", function()
+        if opm_id ~= nil then
+            mp.cancel_timer(opm_id)
+            opm_id = nil
+        end
+    end)
+end
+
 -- 关联 thumbfast.lua
 mp.register_script_message("thumbfast-info", function(json)
     local data = utils.parse_json(json)
@@ -3320,5 +3395,5 @@ mp.register_script_message("thumbfast-info", function(json)
     end
 end)
 
-set_virt_mouse_area(0, 0, 0, 0, "input")
-set_virt_mouse_area(0, 0, 0, 0, "window-controls")
+set_virt_mouse_area(0, 0, 0, 0, "input_osc_plus")
+set_virt_mouse_area(0, 0, 0, 0, "window-controls_osc_plus")
