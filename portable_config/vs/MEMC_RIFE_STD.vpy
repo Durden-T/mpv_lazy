@@ -11,7 +11,7 @@ clip = video_in
 # 用户选项 #
 ############
 
-H_Pre = 1600
+H_Pre = 1440
 Fps_Num = 2
 Fps_Den = 1
 Sc_Mode = 1

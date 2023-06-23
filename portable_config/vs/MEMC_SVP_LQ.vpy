@@ -11,7 +11,7 @@ clip = video_in
 # 用户选项 #
 ############
 
-H_Pre = 1600
+H_Pre = 1440
 Cpu = 0
 Gpu = 0
 Lk_Fmt = False
