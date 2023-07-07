@@ -12,10 +12,10 @@ clip = video_in
 ############
 
 H_Pre = 1440
-Fps_Num = 60000
+Fps_Num =60000
 Fps_Den = 1001
 Abs = True
-Nvof = False
+Nvof = True
 Gpu = 0
 Lk_Fmt = False
 ## 整数，预降低处理源高度（填你的显示器高度）
